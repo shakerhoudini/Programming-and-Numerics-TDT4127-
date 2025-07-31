@@ -4,14 +4,12 @@ from datetime import timedelta, datetime
 def _write_header_if_needed(filename, variables):
     """Write the CSV header if the file does not exist or is empty."""
     try:
-        # Check if file exists and is non-empty
         with open(filename, 'r', newline='') as f:
             if f.read(1):
-                return  # Header already present
+                return
     except FileNotFoundError:
-        pass  # File doesn't exist yet, we'll create it with header
+        pass
 
-    # Build and write header row
     header = [['ModelTime', 's']] + variables
     header_flat = [f"{var[0]} [{var[1]}]" for var in header]
     with open(filename, 'w', newline='') as f:
@@ -35,7 +33,8 @@ def run_long_simulation(
         filename
     ):
     """
-    Run a long simulation in chunks, flushing to CSV periodically to avoid data loss.
+    Run a long simulation in chunks, flushing to CSV periodically to avoid data loss,
+    and print progress at 25% intervals.
 
     :param timeline:       K-Spice Timeline object
     :param selected_app:   Name of the application within the timeline
@@ -47,34 +46,69 @@ def run_long_simulation(
     total_seconds = total_minutes * 60
     buffer = []
 
-    # Ensure the CSV header is in place
+    # prepare progress checkpoints at 25%, 50%, 75%, and 100%
+    checkpoints = [
+        int(total_seconds * 0.25),
+        int(total_seconds * 0.50),
+        int(total_seconds * 0.75),
+        total_seconds
+    ]
+    next_cp = 0
+
     _write_header_if_needed(filename, variables)
 
     try:
         for second in range(1, total_seconds + 1):
-            # Advance simulation by 1 second
+            # advance simulation by 1 second
             timeline.run_for(timedelta(seconds=1))
             sample = timeline.get_values(selected_app, variables)
             sample.insert(0, timeline.model_time.total_seconds())
             buffer.append(sample)
 
-            # Flush buffer to file when it reaches chunk_size
+            # flush buffer if needed
             if len(buffer) >= chunk_size:
                 _flush_buffer(filename, buffer)
                 buffer.clear()
 
-        # Flush any remaining samples after loop completion
+            # print progress at each checkpoint
+            if next_cp < len(checkpoints) and second == checkpoints[next_cp]:
+                print(f"progres {25 * (next_cp + 1)}%")
+                next_cp += 1
+
+        # flush any remaining samples
         if buffer:
             _flush_buffer(filename, buffer)
             buffer.clear()
 
     except Exception as e:
-        # On error, flush what's left in the buffer before re-raising
+        # on error, flush what's left then re-raise
         if buffer:
             _flush_buffer(filename, buffer)
         print(f"[ERROR] Simulation interrupted: {e!r}")
         raise
 
+
+# === Your variables list ===
+variables = [
+    ["D-36L00040A-1200PRd:OutletStream.f",   "kg/h"],
+    ["D-13HCV2319:TargetPosition",          "%"],
+    ["D-13HCV2419:TargetPosition",          "%"],
+    ["D-13HCV2121A:TargetPosition",         "%"],
+    ["D-13HCV2121B:TargetPosition",         "%"],
+    ["D-13HCV0305:TargetPosition",          "%"],
+    ["F-18FCV0105:TargetPosition",          "%"],
+    ["N-18FCV0105_RD1:TargetPosition",      "%"],
+    ["N-18FCV0105_LF1:TargetPosition",      "%"],
+    ["G-13HCV0505:TargetPosition",          "%"],
+    ["D-27PIC0101:InternalSetpoint",        "barg"],
+    ["D-27TIC0106:InternalSetpoint",        "C"],
+    ["D-24PIC0002:InternalSetpoint",        "barg"],
+    ["D-26PIC0056:InternalSetpoint",        "barg"],
+    ["D-20PIC0304:InternalSetpoint",        "barg"],
+    ["D-21L00007A-1400PL-BD20a:OutletStream.f", "kg/h"],
+    ["D-21L00007A-1400PL-BD20a:OutletStream.q", "m3/h"],
+    ["D-21L00007A-1400PL-BD20a:OutletStream.w", "kg/mol"],
+]
 
 # === Example usage ===
 project_name = "DemoProject"
@@ -82,7 +116,7 @@ state = 0
 date_str = datetime.now().strftime("%d.%m.%Y_%H-%M")
 filename = f"{project_name}_state{state}_{date_str}.csv"
 
-# Simulate for 24 hours (1440 minutes), flushing every 500 samples
+# simulate 24 hours (1440 minutes), flush every 500 samples, print progress at each 25%
 run_long_simulation(
     timeline=tl,
     selected_app=selected_app,
